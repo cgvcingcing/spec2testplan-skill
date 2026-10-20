@@ -1,0 +1,4 @@
+interface:
+  display_name: "需求转测试方案"
+  short_description: "梳理需求测试范围、模块对象和正向逆向异常测试点，默认交付精简 HTML 方案"
+  default_prompt: "使用 $spec2testplan，按需求简述、测试范围表、测试模块与对象、测试点与方法生成简洁方案，按模块整理正向、逆向及异常场景，默认交付 HTML。"
