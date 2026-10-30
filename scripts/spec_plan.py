@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 
 from spec_sources import SpecError, digest, extract_sources
+from plan_view import READING_SCRIPT, READING_STYLE, render_approach, render_module, render_markdown_points, render_stats
 
 
 BASIS = {"explicit": "原文明示", "derived": "方法推导", "suggested": "待确认建议"}
@@ -110,11 +111,13 @@ def load_evidence(path):
 def validate_plan(plan, evidence):
     need(isinstance(plan, dict), "plan: expected an object")
     version = plan.get("schema_version")
-    need(type(version) is int and version in {1, 2}, "Unsupported plan schema version")
+    need(type(version) is int and version in {1, 2, 3}, "Unsupported plan schema version")
     required = {"schema_version", "title", "mode", "source_fingerprints", "overview", "requirements", "test_points", "questions", "limitations"}
     note_fields = {"strategy", "preparation", "completion"}
-    if version == 2:
+    if version >= 2:
         required |= {"scope", "modules"}
+    if version == 3:
+        required.add("test_approach")
     keys(plan, required, "plan", note_fields)
     for name in ("title", "overview"):
         text(plan[name], name)
@@ -143,7 +146,7 @@ def validate_plan(plan, evidence):
         if requirement["status"] in {"partial", "conflict"}:
             need(any(identity in q["requirement_ids"] for q in questions.values()), f"{identity}: incomplete or conflicting requirement needs a question")
     modules = {}
-    if version == 2:
+    if version >= 2:
         modules = indexed(plan["modules"], "MOD", "modules")
         scope = indexed(plan["scope"], "SCP", "scope")
         need(bool(modules) and bool(scope), "scope and modules cannot be empty")
@@ -188,13 +191,15 @@ def validate_plan(plan, evidence):
             enum(point["scenario_type"], SCENARIOS, identity + ".scenario_type")
         strings(point["preconditions"], identity + ".preconditions")
         references(point["requirement_ids"], reqs, identity + ".requirement_ids")
-        if version == 2:
+        if version >= 2:
             need(set(point["requirement_ids"]) <= set(module["requirement_ids"]), f"{identity}: requirements do not belong to its module")
         references(point["evidence"], blocks, identity + ".evidence")
         references(point["question_ids"], questions, identity + ".question_ids", False)
         enum(point["basis"], BASIS, identity + ".basis")
         enum(point["status"], {"ready", "needs-confirmation"}, identity + ".status")
         enum(point["priority"], {"P0", "P1", "P2", "unassigned"}, identity + ".priority")
+        if version == 3:
+            need(point["priority"] != "unassigned", f"{identity}: v3 needs an assigned test priority")
         need(isinstance(point["priority_reason"], str), f"{identity}.priority_reason must be text")
         if point["priority"] != "unassigned":
             text(point["priority_reason"], identity + ".priority_reason")
@@ -210,10 +215,34 @@ def validate_plan(plan, evidence):
             need(bool(point["question_ids"]), f"{identity}: unresolved point needs a question")
             for q in point["question_ids"]:
                 need(bool(set(point["requirement_ids"]) & set(questions[q]["requirement_ids"])), f"{identity}: {q} is unrelated to the linked requirements")
-    if version == 2:
+    if version >= 2:
         for identity, module in modules.items():
             covered = {p["function"] for p in points.values() if p["module_id"] == identity}
             need(covered == set(module["functions"]), f"{identity}: every function needs a test point")
+    if version == 3:
+        approach = plan["test_approach"]
+        keys(approach, {"summary", "stages", "focus_areas"}, "test_approach")
+        text(approach["summary"], "test_approach.summary")
+        need(isinstance(approach["stages"], list) and bool(approach["stages"]), "test_approach.stages cannot be empty")
+        planned_modules = set()
+        for index, stage in enumerate(approach["stages"], 1):
+            context = f"test_approach.stages[{index}]"
+            keys(stage, {"title", "intent", "module_ids", "test_point_ids"}, context)
+            text(stage["title"], context + ".title")
+            text(stage["intent"], context + ".intent")
+            references(stage["module_ids"], modules, context + ".module_ids")
+            references(stage["test_point_ids"], points, context + ".test_point_ids")
+            need(all(points[p]["module_id"] in stage["module_ids"] for p in stage["test_point_ids"]),
+                 context + ": test points must belong to the stage modules")
+            planned_modules.update(stage["module_ids"])
+        need(planned_modules == set(modules), "Every module needs a place in the suggested test sequence")
+        need(isinstance(approach["focus_areas"], list) and bool(approach["focus_areas"]), "test_approach.focus_areas cannot be empty")
+        for index, focus in enumerate(approach["focus_areas"], 1):
+            context = f"test_approach.focus_areas[{index}]"
+            keys(focus, {"title", "risk", "test_point_ids"}, context)
+            text(focus["title"], context + ".title")
+            text(focus["risk"], context + ".risk")
+            references(focus["test_point_ids"], points, context + ".test_point_ids")
     for name in sorted(note_fields):
         if version == 1 and plan["mode"] == "plan":
             need(name in plan and isinstance(plan[name], list) and bool(plan[name]), f"plan mode requires non-empty {name}")
@@ -262,7 +291,7 @@ def markdown_table(headers, rows):
 
 def compact_modules(plan):
     """Keep v1 designs readable without guessing their scenario classifications."""
-    if plan["schema_version"] == 2:
+    if plan["schema_version"] >= 2:
         return plan["modules"]
     modules = []
     for area in dict.fromkeys(p["area"] for p in plan["test_points"]):
@@ -291,7 +320,8 @@ def provenance_comment(plan, evidence, source_paths):
     return "<!-- spec2testplan-provenance\n" + raw + "\n-->"
 
 
-def render_plan(plan, evidence, evidence_dir=None, document_dir=None):
+def render_plan(plan, evidence, evidence_dir=None, document_dir=None, layout="html"):
+    enum(layout, {"html", "markdown"}, "layout")
     stats = validate_plan(plan, evidence)
     source_paths = {source["id"]: source["path"] for source in evidence["sources"]}
     if evidence_dir is not None and document_dir is not None:
@@ -300,20 +330,26 @@ def render_plan(plan, evidence, evidence_dir=None, document_dir=None):
             for source in evidence["sources"]
         }
     modules = compact_modules(plan)
+    layered = plan["schema_version"] == 3
+    interactive = layered and layout == "html"
+    counts = render_stats(plan) if interactive else f"{len(modules)} 个模块，{stats['test_points']} 个测试点。"
     questions = {q["id"]: q for q in plan["questions"]}
     lines = [f"# {safe(plan['title'])}", "", "> 设计草稿 · 未执行测试", "",
              "## 需求简述", "", safe(plan["overview"]), "",
-             f"{len(modules)} 个模块，{stats['test_points']} 个测试点。", ""]
+             counts, ""]
     # Source paths remain readable and relative to the delivered document.
     lines.append("来源：" + "；".join(safe(source_paths[s["id"]]) for s in evidence["sources"]) + "。")
-    lines += ["", "## 测试范围", ""]
-    if plan["schema_version"] == 2:
+    lines.append("")
+    if layered:
+        lines += render_approach(plan, plain=not interactive)
+    lines += ["## 测试范围", ""]
+    if plan["schema_version"] >= 2:
         rows = [(item["name"], SCOPE[item["coverage"]], item["boundary"]) for item in plan["scope"]]
     else:
         rows = [(module["name"], "纳入", "；".join(module["functions"])) for module in modules]
     lines += markdown_table(["范围项", "是否测试", "范围边界"], rows)
     # Only material limitations belong in the reading view, not process boilerplate.
-    if plan["schema_version"] == 2:
+    if plan["schema_version"] >= 2:
         lines.extend("- " + safe(item) for item in plan["limitations"])
         if plan["limitations"]:
             lines.append("")
@@ -323,6 +359,9 @@ def render_plan(plan, evidence, evidence_dir=None, document_dir=None):
     lines += markdown_table(["模块", "测试对象", "主要功能"], [
         (m["name"], "、".join(m["objects"]), "；".join(m["functions"])) for m in modules])
     lines += ["## 测试点与方法", ""]
+    if interactive:
+        lines += ['P0 和待确认项默认展开；P1、P2 可按需展开，全部检查内容均保留。', '',
+                  '<div class="sp-toolbar"><button type="button" data-sp-view="all">展开全部测试点</button><button type="button" data-sp-view="focus">只展开重点与待确认</button></div>', '']
     if not modules:
         lines += ["材料不足以确定测试模块，需补充业务规则。", ""]
     emitted_questions = set()
@@ -341,7 +380,12 @@ def render_plan(plan, evidence, evidence_dir=None, document_dir=None):
             function = point.get("function", module["name"])
             scenario = SCENARIOS.get(point.get("scenario_type"), "未分类")
             rows.append((function, scenario, point["id"] + " " + check, expected, point["method"]))
-        lines += markdown_table(["功能", "场景", "测试点", "关键预期", "测试方法"], rows)
+        if interactive:
+            lines += render_module(points, questions)
+        elif layered:
+            lines += render_markdown_points(points, questions)
+        else:
+            lines += markdown_table(["功能", "场景", "测试点", "关键预期", "测试方法"], rows)
         module_questions = [q for q in plan["questions"]
                             if set(q["requirement_ids"]) & set(module["requirement_ids"])
                             and q["id"] not in emitted_questions]
@@ -354,5 +398,9 @@ def render_plan(plan, evidence, evidence_dir=None, document_dir=None):
     for question in plan["questions"]:
         if question["id"] not in emitted_questions:
             lines.append("- 需确认：" + safe(question["question"]))
-    lines += ["", COMPACT_STYLE, "", provenance_comment(plan, evidence, source_paths)]
+    if layout == "html":
+        lines += ["", READING_STYLE if layered else COMPACT_STYLE, ""]
+    if interactive:
+        lines += [READING_SCRIPT, ""]
+    lines += [provenance_comment(plan, evidence, source_paths)]
     return "\n".join(lines).rstrip() + "\n"

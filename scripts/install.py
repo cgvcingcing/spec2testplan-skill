@@ -13,12 +13,13 @@ from pathlib import Path
 
 
 NAME = "spec2testplan"
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 MARKER = ".spec2testplan-install.json"
 PROJECT = Path(__file__).resolve().parent.parent
 PAYLOAD = (
     "SKILL.md", "agents/openai.yaml", "references/output-contract.md",
     "scripts/spec2testplan.py", "scripts/spec_sources.py", "scripts/spec_plan.py",
+    "scripts/plan_view.py",
 )
 
 

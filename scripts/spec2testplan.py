@@ -32,7 +32,7 @@ def write_output(path, content, protected=()):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--version", action="version", version="spec2testplan 1.2.0")
+    parser.add_argument("--version", action="version", version="spec2testplan 1.3.0")
     commands = parser.add_subparsers(dest="command", required=True)
     extract = commands.add_parser("extract", help="Extract source blocks without executing document content")
     extract.add_argument("inputs", nargs="+")
@@ -44,6 +44,7 @@ def main(argv=None):
         if name == "render":
             command.add_argument("-o", "--output", required=True)
             command.add_argument("--document-dir", help="Final delivery directory used for source paths; defaults to the Markdown output directory")
+            command.add_argument("--layout", choices=("html", "markdown"), default="html", help="HTML-ready reading layers (default) or portable Markdown")
     args = parser.parse_args(argv)
     try:
         if args.command == "extract":
@@ -58,7 +59,7 @@ def main(argv=None):
             if args.command == "render":
                 originals = [Path(args.sources).resolve().parent / source["path"] for source in evidence["sources"]]
                 document_dir = Path(args.document_dir or Path(args.output).expanduser().resolve().parent).expanduser().resolve()
-                document = render_plan(plan, evidence, Path(args.sources).resolve().parent, document_dir)
+                document = render_plan(plan, evidence, Path(args.sources).resolve().parent, document_dir, args.layout)
                 write_output(args.output, document, [args.plan, args.sources] + originals)
                 print(f"Rendered: {Path(args.output).resolve()}")
             print("Validation OK: " + ", ".join(f"{key}={value}" for key, value in stats.items()))

@@ -158,7 +158,7 @@
       ]
     }
   ],
-  "schema_version": 2,
+  "schema_version": 3,
   "overview": "虚构示例：员工预约会议室，系统按身份、人数与时段占用校验提交，支持管理员确认和员工取消待确认预约，并保证重复提交不重复建单或占用。",
   "limitations": [
     "人数输入格式、已确认后的取消、同次提交识别及失败提示细节需确认。"
@@ -403,8 +403,8 @@
       "expected": "员工可以提交预约；访客可以查看会议室列表。",
       "status": "ready",
       "question_ids": [],
-      "priority": "unassigned",
-      "priority_reason": "",
+      "priority": "P1",
+      "priority_reason": "不同身份有不同操作范围，需要核对入口与允许行为。",
       "module_id": "MOD-001",
       "function": "身份限制",
       "scenario_type": "positive"
@@ -413,7 +413,7 @@
       "id": "TP-002",
       "title": "访客不能提交",
       "requirement_ids": [
-        "REQ-002"
+        "REQ-003"
       ],
       "evidence": [
         "SRC-001-B0004"
@@ -421,12 +421,12 @@
       "basis": "explicit",
       "method": "场景法",
       "preconditions": [],
-      "action": "以访客身份查看会议室列表。",
-      "expected": "可以查看会议室列表。",
+      "action": "以访客身份尝试提交预约。",
+      "expected": "拒绝提交，不创建预约记录。",
       "status": "ready",
       "question_ids": [],
-      "priority": "unassigned",
-      "priority_reason": "",
+      "priority": "P1",
+      "priority_reason": "访客不能绕过身份限制创建预约。",
       "module_id": "MOD-001",
       "function": "身份限制",
       "scenario_type": "negative"
@@ -451,8 +451,8 @@
       "expected": "1～5 人均满足人数规则；时段可用时可创建待确认预约。",
       "status": "ready",
       "question_ids": [],
-      "priority": "unassigned",
-      "priority_reason": "",
+      "priority": "P1",
+      "priority_reason": "人数端点决定有效输入边界，需和提交结果联动验证。",
       "module_id": "MOD-001",
       "function": "人数校验",
       "scenario_type": "positive"
@@ -478,15 +478,15 @@
       "expected": "均拒绝提交，不创建预约记录。",
       "status": "ready",
       "question_ids": [],
-      "priority": "unassigned",
-      "priority_reason": "",
+      "priority": "P1",
+      "priority_reason": "范围外数量应拒绝，不能产生违反人数规则的记录。",
       "module_id": "MOD-001",
       "function": "人数校验",
       "scenario_type": "negative"
     },
     {
       "id": "TP-005",
-      "title": "人数格式待确认",
+      "title": "人数输入格式",
       "requirement_ids": [
         "REQ-004",
         "REQ-005"
@@ -494,15 +494,17 @@
       "evidence": [
         "SRC-001-B0005"
       ],
-      "basis": "derived",
+      "basis": "suggested",
       "method": "等价类划分、边界值分析",
       "preconditions": [],
-      "action": "以已登录员工身份对未占用时段提交6人预约。",
-      "expected": "拒绝提交，不创建预约记录。",
-      "status": "ready",
-      "question_ids": [],
-      "priority": "unassigned",
-      "priority_reason": "",
+      "action": "检查人数为空、非整数、非数字的输入。",
+      "expected": null,
+      "status": "needs-confirmation",
+      "question_ids": [
+        "Q-003"
+      ],
+      "priority": "P1",
+      "priority_reason": "输入格式约束未定义，先确认再验证拒绝结果。",
       "module_id": "MOD-001",
       "function": "人数校验",
       "scenario_type": "negative"
@@ -511,22 +513,21 @@
       "id": "TP-006",
       "title": "有效提交建立预约并占用时段",
       "requirement_ids": [
-        "REQ-004"
+        "REQ-008",
+        "REQ-009"
       ],
       "evidence": [
-        "SRC-001-B0005"
+        "SRC-001-B0006"
       ],
-      "basis": "suggested",
+      "basis": "explicit",
       "method": "等价类划分",
       "preconditions": [],
-      "action": "分别检查人数为空、非整数和非数字的输入。",
-      "expected": null,
-      "status": "needs-confirmation",
-      "question_ids": [
-        "Q-003"
-      ],
-      "priority": "unassigned",
-      "priority_reason": "",
+      "action": "以已登录员工身份对未占用时段提交1～5人的有效预约。",
+      "expected": "创建一条待确认预约并占用该时段。",
+      "status": "ready",
+      "question_ids": [],
+      "priority": "P0",
+      "priority_reason": "有效预约创建及占用是本次需求的核心业务结果。",
       "module_id": "MOD-001",
       "function": "时段占用",
       "scenario_type": "positive"
@@ -547,8 +548,8 @@
       "expected": "拒绝提交，不创建预约记录。",
       "status": "ready",
       "question_ids": [],
-      "priority": "unassigned",
-      "priority_reason": "",
+      "priority": "P0",
+      "priority_reason": "已占用时段再次被预约会破坏资源唯一占用。",
       "module_id": "MOD-001",
       "function": "时段占用",
       "scenario_type": "negative"
@@ -571,8 +572,8 @@
       "expected": "预约变为已确认，原时段继续占用。",
       "status": "ready",
       "question_ids": [],
-      "priority": "unassigned",
-      "priority_reason": "",
+      "priority": "P1",
+      "priority_reason": "确认状态变化后需继续保留原占用。",
       "module_id": "MOD-002",
       "function": "管理员确认",
       "scenario_type": "positive"
@@ -600,8 +601,8 @@
       "expected": "原预约为已取消，时段释放；新预约可创建并占用该时段。",
       "status": "ready",
       "question_ids": [],
-      "priority": "unassigned",
-      "priority_reason": "",
+      "priority": "P0",
+      "priority_reason": "取消释放决定时段能否正确再次预约。",
       "module_id": "MOD-002",
       "function": "员工取消",
       "scenario_type": "positive"
@@ -624,8 +625,8 @@
       "question_ids": [
         "Q-001"
       ],
-      "priority": "unassigned",
-      "priority_reason": "",
+      "priority": "P1",
+      "priority_reason": "已确认预约的取消规则影响状态与资源，需确认适用边界。",
       "module_id": "MOD-002",
       "function": "员工取消",
       "scenario_type": "negative"
@@ -647,8 +648,8 @@
       "expected": "只创建一条预约记录，时段不重复占用。",
       "status": "ready",
       "question_ids": [],
-      "priority": "unassigned",
-      "priority_reason": "",
+      "priority": "P0",
+      "priority_reason": "重复点击或重发不得产生重复记录和重复占用。",
       "module_id": "MOD-003",
       "function": "重复提交",
       "scenario_type": "exception"
@@ -672,8 +673,8 @@
       "question_ids": [
         "Q-004"
       ],
-      "priority": "unassigned",
-      "priority_reason": "",
+      "priority": "P1",
+      "priority_reason": "同一次提交的判据影响重复请求数据构造，需要先确认。",
       "module_id": "MOD-003",
       "function": "重复提交",
       "scenario_type": "exception"
@@ -695,8 +696,8 @@
       "expected": "最终该时段只被一条预约占用；提交时遇到时段已被占用的请求被拒绝且不创建记录。",
       "status": "ready",
       "question_ids": [],
-      "priority": "unassigned",
-      "priority_reason": "",
+      "priority": "P0",
+      "priority_reason": "共享时段竞争时最终只能一条预约占用。",
       "module_id": "MOD-003",
       "function": "时段竞争",
       "scenario_type": "exception"
@@ -721,8 +722,8 @@
       "expected": "显示会议室、时段、人数、状态；状态由待确认变为已确认。",
       "status": "ready",
       "question_ids": [],
-      "priority": "unassigned",
-      "priority_reason": "",
+      "priority": "P2",
+      "priority_reason": "列表字段与状态在核心状态迁移验证后补齐展示回归。",
       "module_id": "MOD-004",
       "function": "列表展示",
       "scenario_type": "positive"
@@ -744,11 +745,11 @@
       "method": "场景法",
       "preconditions": [],
       "action": "分别以非法人数、已占用时段提交预约。",
-      "expected": "均拒绝提交，并展示对应失败原因；具体文案和错误码待确认。",
+      "expected": "均拒绝提交、不创建预约记录，并展示对应失败原因；提示细节另行确认。",
       "status": "ready",
       "question_ids": [],
-      "priority": "unassigned",
-      "priority_reason": "",
+      "priority": "P1",
+      "priority_reason": "失败原因需和实际拒绝规则对应，便于用户调整。",
       "module_id": "MOD-004",
       "function": "失败原因",
       "scenario_type": "negative"
@@ -771,11 +772,75 @@
       "question_ids": [
         "Q-002"
       ],
-      "priority": "unassigned",
-      "priority_reason": "",
+      "priority": "P2",
+      "priority_reason": "提示文案和错误码细节待定，不替代明确的拒绝结果检查。",
       "module_id": "MOD-004",
       "function": "失败原因",
       "scenario_type": "negative"
     }
-  ]
+  ],
+  "test_approach": {
+    "summary": "先以员工身份提交一条有效预约，对照记录与时段占用；再确认和取消，观察状态及资源释放。之后测试不合规输入、重复提交和同一时段竞争，最后补列表与失败提示。",
+    "stages": [
+      {
+        "title": "跑通创建、确认与取消",
+        "intent": "通过一条有效预约建立状态和资源的对照，再验证释放后的时段可再次使用。",
+        "module_ids": [
+          "MOD-001",
+          "MOD-002"
+        ],
+        "test_point_ids": [
+          "TP-006",
+          "TP-008",
+          "TP-009"
+        ]
+      },
+      {
+        "title": "验证拦截、重发与竞争",
+        "intent": "复用已验证的可用时段，比较不合格提交、同次重发和不同提交竞争的记录与占用。",
+        "module_ids": [
+          "MOD-001",
+          "MOD-003"
+        ],
+        "test_point_ids": [
+          "TP-002",
+          "TP-004",
+          "TP-011",
+          "TP-013"
+        ]
+      },
+      {
+        "title": "补齐展示及待确认分支",
+        "intent": "核心状态确定后核对列表与失败原因；已确认取消和提示细节先对齐口径。",
+        "module_ids": [
+          "MOD-004",
+          "MOD-002"
+        ],
+        "test_point_ids": [
+          "TP-014",
+          "TP-015",
+          "TP-010"
+        ]
+      }
+    ],
+    "focus_areas": [
+      {
+        "title": "记录和时段占用同时正确",
+        "risk": "仅收到成功提示不能说明预约正确，还要检查只创建一条记录且占用相应时段；取消后资源能再次预约。",
+        "test_point_ids": [
+          "TP-006",
+          "TP-009"
+        ]
+      },
+      {
+        "title": "重发和竞争不扩大资源占用",
+        "risk": "同次重发应只有一条记录，不同提交竞争也不能同时占同一时段；核对提交结果和最终占用。",
+        "test_point_ids": [
+          "TP-011",
+          "TP-013",
+          "TP-012"
+        ]
+      }
+    ]
+  }
 }

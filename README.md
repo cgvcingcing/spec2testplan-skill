@@ -63,14 +63,17 @@ JSON 不作为默认或兜底格式。分析中的证据 JSON、设计 JSON 和 
 
 Agent 会读取并调用已发现的 `doc-to-html` Skill，遵循它的转换、自检和清理流程。已安装但转换失败时先诊断修复，仍失败则说明故障；这种情况不能冒充“未安装”而静默切换格式。
 
-正文采用四部分：
+正文先给阅读主线，再保留完整检查：
 
 1. 需求简述：改动目标与主要影响。
-2. 测试范围：表格说明哪些纳入、哪些不纳入、哪些待确认及边界。
-3. 测试模块与对象：模块、测试对象及主要功能。
-4. 测试点与方法：按模块列功能、正向/逆向/异常场景、测试点、关键预期和方法。
+2. 测试思路与重点：具体业务测法、建议先后顺序、重点风险及可跳转的检查入口。
+3. 测试范围：说明纳入、不纳入、待确认及边界。
+4. 测试模块与对象：模块、页面／服务／接口等对象及主要功能。
+5. 测试点与方法：按模块保留验证内容、预期、场景、方法及有理由的 P0／P1／P2。
 
-同类字段、入口及边界归并到功能层，不展开逐步操作用例。待确认内容放在受影响模块附近；不再单列规则、策略、准备、完成、矩阵或依据索引。输出为待评审设计，不表示已执行。
+HTML 首页说明怎么测、先测什么、为什么重点测；明细按优先级分组，P0 和待确认项默认展开，P1／P2 可按需展开。重点链接会打开对应检查，提供展开全部与恢复重点阅读，打印保留全部内容。折叠不删除测试点，追溯编号只放不可见注释。
+
+优先级取决于本次改动的失败影响，测试顺序还取决于前置依赖。高影响但预期不清的点可标 P0，同时继续保持待确认，不冒充可验收结果。同类字段、入口和边界按功能归并，不展开逐步操作用例。输出仍为待评审设计，不表示已执行。
 
 ## 处理原则
 
@@ -91,7 +94,9 @@ python3 scripts/spec2testplan.py validate <work-dir>/plan.json --sources <work-d
 python3 scripts/spec2testplan.py render <work-dir>/plan.json --sources <work-dir>/sources.json -o <work-dir>/testplan.md --document-dir <delivery-dir>
 ```
 
-`render` 只生成 Markdown，默认 HTML 交付还需由 Agent 调用 `doc-to-html` Skill。`--document-dir` 只影响正文中的来源路径，不移动或修改证据；省略时默认以 Markdown 输出文件的目录为基准。
+`render` 只生成中间稿，默认 HTML 交付还需由 Agent 调用 `doc-to-html` Skill。`--document-dir` 只影响正文与追溯注释的来源路径，不移动或修改证据；省略时默认以 Markdown 输出文件的目录为基准。
+
+默认 `--layout html` 为 HTML 交付生成带阅读组件的中间稿；明确交付 Markdown 或兜底 Markdown 时改用 `--layout markdown`，保留相同内容而不嵌入交互代码。
 
 可直接查看 [虚构需求](examples/sample.md) 和 [HTML 测试方案](examples/sample.testplan.html)。`examples/fixtures/` 中的 JSON 是用于复现校验的固定输入，不表示默认交付 JSON。示例中的数字和业务规则仅用于演示，不属于技能的默认业务规则。复核示例：
 
@@ -100,7 +105,7 @@ python3 scripts/spec2testplan.py validate examples/fixtures/sample.testplan.json
 # 更新 HTML 时，先渲染到任务临时目录，再调用 doc-to-html Skill 转换到 examples/
 ```
 
-设计 schema v2 增加范围、模块对象与场景类型；v1 数据仍可校验和精简渲染。测试覆盖来源变化、冲突与未确认预期、模块功能映射、注释安全和临时文件清理后的来源定位。
+设计 schema v3 在 v2 的范围、模块和场景上增加 `test_approach`，要求点级优先级及理由。v1／v2 继续兼容，不自动猜风险。测试覆盖顺序与重点引用、折叠不丢内容、来源变化、冲突与未确认预期、模块映射、注释安全和清理后的来源定位。
 
 运行回归检查：
 
@@ -117,6 +122,7 @@ references/output-contract.md   内部 JSON 字段、引用与交付约定
 scripts/spec2testplan.py         静态提取、结构校验、Markdown 中间稿渲染
 scripts/spec_sources.py          Markdown / HTML 证据解析
 scripts/spec_plan.py             设计校验与文档生成
+scripts/plan_view.py             主线、重点与可展开检查的阅读层
 scripts/install.py              双平台安装、校验与卸载
 install.sh                      安装入口
 examples/                       虚构需求、HTML 示例与校验 fixtures

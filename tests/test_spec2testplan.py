@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from html.parser import HTMLParser
 from pathlib import Path
 
 
@@ -50,6 +51,20 @@ def compact_plan_for(evidence):
     point.pop('area')
     point.update(module_id='MOD-001', function='Quantity validation', scenario_type='negative')
     point.update(action='Submit with 0 or 6 units.', expected='Reject either value because it is outside 1 to 5.')
+    return plan
+
+
+def layered_plan_for(evidence):
+    plan = compact_plan_for(evidence)
+    plan['schema_version'] = 3
+    plan['test_points'][0].update(priority='P1', priority_reason='Invalid quantities must not create a record.')
+    plan['test_approach'] = {
+        'summary': 'Submit boundary quantities and inspect both the response and created records.',
+        'stages': [{'title': 'Validate submission', 'intent': 'The entry rule gates record creation.',
+                    'module_ids': ['MOD-001'], 'test_point_ids': ['TP-001']}],
+        'focus_areas': [{'title': 'Reject invalid quantities', 'risk': 'An invalid record would violate the supplied rule.',
+                         'test_point_ids': ['TP-001']}],
+    }
     return plan
 
 
@@ -260,6 +275,132 @@ class ArtifactTests(unittest.TestCase):
                          ['需求简述', '测试范围', '测试模块与对象', '测试点与方法'])
         self.assertIsNone(provenance_from(rendered)['plan']['test_points'][0]['expected'])
 
+    def test_v3_requires_judged_priorities_and_nonempty_reasons(self):
+        for changes in ({'priority': 'unassigned'}, {'priority_reason': ' '}):
+            with self.subTest(changes=changes):
+                plan = layered_plan_for(self.evidence)
+                plan['test_points'][0].update(changes)
+                with self.assertRaises(SpecError):
+                    validate_plan(plan, self.evidence)
+        # A small design need not invent P0 and P2 points to fill categories.
+        self.assertEqual(validate_plan(layered_plan_for(self.evidence), self.evidence)['test_points'], 1)
+
+    def test_v3_rejects_unlinked_sequence_and_focus_items(self):
+        mutations = [
+            lambda p: p['test_approach'].update(stages=[]),
+            lambda p: p['test_approach'].update(focus_areas=[]),
+            lambda p: p['test_approach']['stages'][0].update(test_point_ids=['TP-999']),
+            lambda p: p['test_approach']['stages'][0].update(module_ids=['MOD-999']),
+            lambda p: p['test_approach']['focus_areas'][0].update(test_point_ids=['TP-999']),
+            lambda p: p['test_approach']['focus_areas'][0].update(risk=''),
+        ]
+        for mutate in mutations:
+            with self.subTest(mutate=mutate):
+                plan = layered_plan_for(self.evidence)
+                mutate(plan)
+                with self.assertRaises(SpecError):
+                    validate_plan(plan, self.evidence)
+
+    def test_v3_sequence_references_its_own_modules_and_includes_every_module(self):
+        plan = layered_plan_for(self.evidence)
+        module = copy.deepcopy(plan['modules'][0])
+        module.update(id='MOD-002', name='Second module')
+        plan['modules'].append(module)
+        plan['scope'][0]['module_ids'].append('MOD-002')
+        point = copy.deepcopy(plan['test_points'][0])
+        point.update(id='TP-002', module_id='MOD-002')
+        plan['test_points'].append(point)
+        with self.assertRaisesRegex(SpecError, 'Every module needs a place'):
+            validate_plan(plan, self.evidence)
+        stage = copy.deepcopy(plan['test_approach']['stages'][0])
+        stage.update(module_ids=['MOD-002'])
+        plan['test_approach']['stages'].append(stage)
+        with self.assertRaisesRegex(SpecError, 'belong to the stage'):
+            validate_plan(plan, self.evidence)
+        stage['test_point_ids'] = ['TP-002']
+        validate_plan(plan, self.evidence)
+
+    def test_v3_priority_does_not_confirm_unknown_expectations(self):
+        plan = layered_plan_for(self.evidence)
+        point = plan['test_points'][0]
+        point.update(priority='P0', expected=None, status='needs-confirmation', question_ids=['Q-001'])
+        plan['questions'] = [{'id': 'Q-001', 'question': 'Which boundary applies?', 'reason': 'Conflicting sources.',
+                              'requirement_ids': ['REQ-001'], 'evidence': point['evidence']}]
+        plan['requirements'][0]['status'] = 'conflict'
+        validate_plan(plan, self.evidence)
+        rendered = render_plan(plan, self.evidence)
+        self.assertIn('待确认预期', rendered)
+        self.assertIsNone(provenance_from(rendered)['plan']['test_points'][0]['expected'])
+        point.update(expected='Invented acceptance', status='ready', question_ids=[])
+        with self.assertRaisesRegex(SpecError, 'conflicting requirement'):
+            validate_plan(plan, self.evidence)
+
+    def test_v3_collapsing_retains_every_point_and_links_resolve(self):
+        plan = layered_plan_for(self.evidence)
+        for index, priority in enumerate(('P0', 'P2'), 2):
+            point = copy.deepcopy(plan['test_points'][0])
+            point.update(id='TP-%03d' % index, priority=priority, title='Check %s' % index)
+            plan['test_points'].append(point)
+        rendered = render_plan(plan, self.evidence)
+        visible = rendered.split('<!-- spec2testplan-provenance', 1)[0]
+
+        class View(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.points, self.targets, self.open_groups = [], [], []
+
+            def handle_starttag(self, tag, attrs):
+                attrs = dict(attrs)
+                if attrs.get('class') == 'sp-point':
+                    self.points.append(attrs['id'])
+                if tag == 'a' and attrs.get('href', '').startswith('#sp-point-'):
+                    self.targets.append(attrs['href'][1:])
+                if tag == 'details':
+                    self.open_groups.append('open' in attrs)
+
+        view = View()
+        view.feed(visible)
+        self.assertEqual(set(view.points), {'sp-point-tp-001', 'sp-point-tp-002', 'sp-point-tp-003'})
+        self.assertEqual(len(view.points), 3)
+        self.assertTrue(set(view.targets) <= set(view.points))
+        self.assertEqual(view.open_groups, [True, False, False])
+        self.assertEqual(provenance_from(rendered)['plan'], plan)
+        self.assertNotIn('TP-001', visible)
+        for point in plan['test_points']:
+            self.assertIn(point['action'], visible)
+            self.assertIn(point['expected'], visible)
+
+    def test_v3_cards_and_approach_escape_document_text(self):
+        plan = layered_plan_for(self.evidence)
+        attack = '</div><script>alert("unsafe")</script>'
+        plan['test_approach']['summary'] = attack
+        plan['test_approach']['focus_areas'][0]['risk'] = attack
+        plan['test_points'][0]['title'] = attack
+        plan['test_points'][0]['priority_reason'] = attack
+        rendered = render_plan(plan, self.evidence)
+        self.assertNotIn(attack, rendered)
+        self.assertIn('&lt;script&gt;', rendered)
+        self.assertEqual(provenance_from(rendered)['plan'], plan)
+
+    def test_v3_portable_markdown_keeps_the_same_design_without_ui_code(self):
+        plan = layered_plan_for(self.evidence)
+        rendered = render_plan(plan, self.evidence, layout='markdown')
+        visible = rendered.split('<!-- spec2testplan-provenance', 1)[0]
+        for tag in ('<details', '<script', '<style', '<div'):
+            self.assertNotIn(tag, visible)
+        self.assertIn(plan['test_points'][0]['action'], visible)
+        self.assertIn(plan['test_points'][0]['expected'], visible)
+        self.assertIn(plan['test_points'][0]['priority_reason'], visible)
+        self.assertEqual(provenance_from(rendered)['plan'], plan)
+
+    def test_fictional_example_matches_the_current_design_contract(self):
+        evidence = load_evidence(PROJECT / 'examples/fixtures/sample.sources.json')
+        plan = read_json(PROJECT / 'examples/fixtures/sample.testplan.json')
+        stats = validate_plan(plan, evidence)
+        rendered = render_plan(plan, evidence)
+        self.assertEqual(rendered.count('class="sp-point"'), stats['test_points'])
+        self.assertEqual(provenance_from(rendered)['plan'], plan)
+
     def test_provenance_is_inert_and_round_trips_untrusted_text(self):
         plan = compact_plan_for(self.evidence)
         attack = '--> <script>alert(1)</script> | rule'
@@ -352,6 +493,8 @@ class InstallerTests(unittest.TestCase):
         for platform in ('codex', 'claude'):
             installed = self.root / platform / 'skills/spec2testplan'
             self.assertEqual((installed / 'SKILL.md').read_bytes(), (PROJECT / 'SKILL.md').read_bytes())
+            result = subprocess.run([sys.executable, str(installed / 'scripts/spec2testplan.py'), '--version'], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
             (installed / 'obsolete.txt').write_text('old')
         self.assertEqual(installer.main(self.args), 0)
         self.assertFalse((self.root / 'codex/skills/spec2testplan/obsolete.txt').exists())
